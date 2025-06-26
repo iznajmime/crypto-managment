@@ -1,38 +1,23 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { AppLayout } from './components/layout/AppLayout';
-import ClientsPage from './pages/Clients';
-import TradesPage from './pages/Trades';
-import { Toaster } from 'sonner';
-import AuthGuard from './components/auth/AuthGuard';
-import LoginPage from './pages/Login';
-import SignUpPage from './pages/SignUp';
-import DashboardPage from './pages/Dashboard';
-
-function ProtectedRoutes() {
-  return (
-    <AuthGuard>
-      <AppLayout>
-        <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/clients" element={<ClientsPage />} />
-          <Route path="/trades" element={<TradesPage />} />
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
-        </Routes>
-      </AppLayout>
-    </AuthGuard>
-  );
-}
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+} from "react-router-dom";
+import { Layout } from "./components/Layout";
+import Dashboard from "./pages/Dashboard";
+import Trades from "./pages/Trades";
+import Clients from "./pages/Clients";
 
 function App() {
   return (
     <Router>
       <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/signup" element={<SignUpPage />} />
-        <Route path="/*" element={<ProtectedRoutes />} />
+        <Route path="/" element={<Layout />}>
+          <Route index element={<Dashboard />} />
+          <Route path="trades" element={<Trades />} />
+          <Route path="clients" element={<Clients />} />
+        </Route>
       </Routes>
-      <Toaster richColors position="top-right" />
     </Router>
   );
 }

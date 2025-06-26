@@ -1,38 +1,29 @@
-import { useState, useEffect, useCallback } from 'react';
+import { supabase } from '@/lib/supabase';
+import { useEffect, useState, useCallback } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import * as z from 'zod';
 import { PlusCircle } from 'lucide-react';
+
 import { Button } from '@/components/ui/button';
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
-import {
   Table,
-  TableBody,
-  TableCell,
-  TableHead,
   TableHeader,
+  TableBody,
   TableRow,
+  TableHead,
+  TableCell,
 } from '@/components/ui/table';
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogFooter,
+  DialogDescription,
+  DialogClose,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import {
   Form,
   FormControl,
@@ -41,238 +32,276 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { supabase } from '@/lib/supabaseClient';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import * as z from 'zod';
-import { toast } from 'sonner';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
-export type Profile = {
+interface Profile {
   id: string;
-  created_at: string;
   name: string;
   total_deposited_usd: number;
-  email?: string | null;
-  phoneNumber?: string | null;
-};
+}
 
-const clientFormSchema = z.object({
-  name: z.string().min(2, {
-    message: 'Client name must be at least 2 characters.',
-  }),
-  initialDeposit: z.coerce
-    .number({ invalid_type_error: 'Please enter a valid number.' })
-    .positive({ message: 'Initial deposit must be a positive number.' }),
-  email: z.string().email({ message: 'Please enter a valid email.' }).optional().or(z.literal('')),
+const addClientSchema = z.object({
+  name: z.string().min(2, { message: 'Name must be at least 2 characters.' }),
+  email: z.string().email({ message: 'Invalid email address.' }),
   phoneNumber: z.string().optional(),
+  initial_deposit: z.coerce
+    .number()
+    .positive({ message: 'Initial deposit must be a positive number.' }),
 });
 
-const depositWithdrawFormSchema = z.object({
-  transaction_type: z.enum(['DEPOSIT', 'WITHDRAW']),
+const manageFundsSchema = z.object({
+  type: z.enum(['DEPOSIT', 'WITHDRAW']),
   amount: z.coerce
-    .number({ invalid_type_error: 'Please enter a valid number.' })
+    .number()
     .positive({ message: 'Amount must be a positive number.' }),
 });
 
-export default function ClientsPage() {
-  const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [isCreateDialogOpen, setCreateDialogOpen] = useState(false);
-  const [isDepositWithdrawDialogOpen, setDepositWithdrawDialogOpen] = useState(false);
-  const [selectedProfile, setSelectedProfile] = useState<Profile | null>(null);
+export default function Clients() {
+  const [clients, setClients] = useState<Profile[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isAddClientOpen, setAddClientOpen] = useState(false);
+  const [isManageFundsOpen, setManageFundsOpen] = useState(false);
+  const [selectedClient, setSelectedClient] = useState<Profile | null>(null);
 
-  const createClientForm = useForm<z.infer<typeof clientFormSchema>>({
-    resolver: zodResolver(clientFormSchema),
-    defaultValues: {
-      name: '',
-      initialDeposit: undefined,
-      email: '',
-      phoneNumber: '',
-    },
-  });
-
-  const depositWithdrawForm = useForm<z.infer<typeof depositWithdrawFormSchema>>({
-    resolver: zodResolver(depositWithdrawFormSchema),
-    defaultValues: {
-      transaction_type: 'DEPOSIT',
-      amount: undefined,
-    },
-  });
-
-  const fetchProfiles = useCallback(async () => {
-    const { data, error } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
+  const fetchClients = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, name, total_deposited_usd')
+      .order('name', { ascending: true });
 
     if (error) {
-      console.error('Error fetching profiles:', error);
-      toast.error('Failed to fetch clients.');
-    } else if (data) {
-      setProfiles(data);
+      console.error('Error fetching clients:', error);
+      setError('Failed to fetch clients. Please try again.');
+    } else {
+      setClients(data as Profile[]);
     }
+    setLoading(false);
   }, []);
 
   useEffect(() => {
-    fetchProfiles();
-  }, [fetchProfiles]);
+    fetchClients();
+  }, [fetchClients]);
 
-  async function onCreateClientSubmit(values: z.infer<typeof clientFormSchema>) {
+  const addClientForm = useForm<z.infer<typeof addClientSchema>>({
+    resolver: zodResolver(addClientSchema),
+    defaultValues: {
+      name: '',
+      email: '',
+      phoneNumber: '',
+      initial_deposit: undefined,
+    },
+  });
+
+  async function onAddClientSubmit(values: z.infer<typeof addClientSchema>) {
     try {
-      const newProfilePayload = {
-        name: values.name,
-        total_deposited_usd: values.initialDeposit,
-        email: values.email || null,
-        phoneNumber: values.phoneNumber || null,
-      };
-
       const { data: profileData, error: profileError } = await supabase
         .from('profiles')
-        .insert(newProfilePayload)
-        .select()
+        .insert({
+          name: values.name,
+          email: values.email,
+          phoneNumber: values.phoneNumber,
+          total_deposited_usd: values.initial_deposit,
+        })
+        .select('id')
         .single();
 
       if (profileError) throw profileError;
-      if (!profileData) {
-        throw new Error("Failed to retrieve profile after creation. RLS policies might be misconfigured.");
-      }
+      if (!profileData) throw new Error('Failed to create profile.');
 
       const { error: transactionError } = await supabase
         .from('transactions')
         .insert({
           profile_id: profileData.id,
           transaction_type: 'DEPOSIT',
+          transaction_value_usd: values.initial_deposit,
           asset: 'USD',
-          transaction_value_usd: values.initialDeposit,
         });
 
       if (transactionError) throw transactionError;
 
-      toast.success('Client added successfully!');
-      setCreateDialogOpen(false);
-      createClientForm.reset();
-      await fetchProfiles();
-    } catch (error: any) {
-      console.error('Error creating client:', error);
-      toast.error(error.message || 'Failed to add client. Please try again.');
+      addClientForm.reset();
+      setAddClientOpen(false);
+      await fetchClients();
+    } catch (error) {
+      console.error('Error adding new client:', error);
+      addClientForm.setError('root', {
+        message: 'Failed to add client. Please try again.',
+      });
     }
   }
 
-  const handleDepositWithdrawClick = (profile: Profile) => {
-    setSelectedProfile(profile);
-    depositWithdrawForm.reset({ transaction_type: 'DEPOSIT', amount: undefined });
-    setDepositWithdrawDialogOpen(true);
-  };
+  const manageFundsForm = useForm<z.infer<typeof manageFundsSchema>>({
+    resolver: zodResolver(manageFundsSchema),
+    defaultValues: {
+      type: 'DEPOSIT',
+      amount: undefined,
+    },
+  });
 
-  async function onDepositWithdrawSubmit(values: z.infer<typeof depositWithdrawFormSchema>) {
-    if (!selectedProfile) {
-      toast.error("No client selected.");
-      return;
-    }
+  async function onManageFundsSubmit(
+    values: z.infer<typeof manageFundsSchema>
+  ) {
+    if (!selectedClient) return;
 
     try {
+      const currentDeposit = selectedClient.total_deposited_usd;
+      const amount = values.amount;
+      const newTotal =
+        values.type === 'DEPOSIT'
+          ? currentDeposit + amount
+          : currentDeposit - amount;
+
+      if (newTotal < 0) {
+        manageFundsForm.setError('amount', {
+          message: 'Withdrawal cannot exceed total deposited capital.',
+        });
+        return;
+      }
+
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({ total_deposited_usd: newTotal })
+        .eq('id', selectedClient.id);
+
+      if (profileError) throw profileError;
+
       const { error: transactionError } = await supabase
         .from('transactions')
         .insert({
-          profile_id: selectedProfile.id,
-          transaction_type: values.transaction_type,
+          profile_id: selectedClient.id,
+          transaction_type: values.type,
+          transaction_value_usd: amount,
           asset: 'USD',
-          transaction_value_usd: values.amount,
         });
 
       if (transactionError) throw transactionError;
 
-      const amountToUpdate = values.transaction_type === 'DEPOSIT' ? values.amount : -values.amount;
-      const { error: rpcError } = await supabase.rpc('update_client_deposit', {
-        client_id: selectedProfile.id,
-        deposit_amount: amountToUpdate,
+      manageFundsForm.reset();
+      setManageFundsOpen(false);
+      setSelectedClient(null);
+      await fetchClients();
+    } catch (error) {
+      console.error('Error managing funds:', error);
+      manageFundsForm.setError('root', {
+        message: 'Transaction failed. Please try again.',
       });
-
-      if (rpcError) throw rpcError;
-
-      toast.success(`${values.transaction_type.charAt(0).toUpperCase() + values.transaction_type.slice(1).toLowerCase()} successful!`);
-      setDepositWithdrawDialogOpen(false);
-      await fetchProfiles();
-    } catch (error: any) {
-      console.error('Error processing transaction:', error);
-      toast.error(error.message || `Failed to process ${values.transaction_type.toLowerCase()}. Please try again.`);
     }
   }
 
+  const handleManageFundsClick = (client: Profile) => {
+    setSelectedClient(client);
+    manageFundsForm.reset();
+    setManageFundsOpen(true);
+  };
+
   return (
-    <div>
-      <div className="flex items-center justify-between mb-8">
+    <div className="glass-card p-6">
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-4xl font-bold tracking-tight">Clients</h1>
-          <p className="text-muted-foreground">Manage your client profiles and view their performance.</p>
+          <h1 className="text-3xl font-bold tracking-tight">Clients</h1>
+          <p className="text-muted-foreground">
+            Manage client profiles and their capital.
+          </p>
         </div>
-        <Dialog open={isCreateDialogOpen} onOpenChange={setCreateDialogOpen}>
+        <Dialog open={isAddClientOpen} onOpenChange={setAddClientOpen}>
           <DialogTrigger asChild>
             <Button>
-              <PlusCircle className="mr-2 h-4 w-4" /> New Client
+              <PlusCircle className="mr-2 h-4 w-4" />
+              Add New Client
             </Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>
-              <DialogTitle>Create New Client</DialogTitle>
+              <DialogTitle>Add New Client</DialogTitle>
               <DialogDescription>
-                Enter the client's details and their initial deposit. This will create a new profile and log the first transaction.
+                Enter the client's details and their initial deposit.
               </DialogDescription>
             </DialogHeader>
-            <Form {...createClientForm}>
-              <form onSubmit={createClientForm.handleSubmit(onCreateClientSubmit)} className="space-y-4">
+            <Form {...addClientForm}>
+              <form
+                onSubmit={addClientForm.handleSubmit(onAddClientSubmit)}
+                className="space-y-4"
+              >
                 <FormField
-                  control={createClientForm.control}
+                  control={addClientForm.control}
                   name="name"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Client Name</FormLabel>
+                      <FormLabel>Name</FormLabel>
                       <FormControl>
-                        <Input placeholder="e.g. Jane Doe" {...field} />
+                        <Input placeholder="John Doe" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
                 <FormField
-                  control={createClientForm.control}
-                  name="initialDeposit"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Initial Deposit (USD)</FormLabel>
-                      <FormControl>
-                        <Input type="number" placeholder="e.g. 50000" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={createClientForm.control}
+                  control={addClientForm.control}
                   name="email"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Email (Optional)</FormLabel>
+                      <FormLabel>Email</FormLabel>
                       <FormControl>
-                        <Input placeholder="e.g. client@email.com" {...field} />
+                        <Input placeholder="john.doe@email.com" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
                 <FormField
-                  control={createClientForm.control}
+                  control={addClientForm.control}
                   name="phoneNumber"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Phone Number (Optional)</FormLabel>
                       <FormControl>
-                        <Input placeholder="e.g. +1 234 567 890" {...field} />
+                        <Input placeholder="+1 (555) 123-4567" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
+                <FormField
+                  control={addClientForm.control}
+                  name="initial_deposit"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Initial Deposit (USD)</FormLabel>
+                      <FormControl>
+                        <Input type="number" placeholder="50000" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                {addClientForm.formState.errors.root && (
+                  <p className="text-sm font-medium text-destructive">
+                    {addClientForm.formState.errors.root.message}
+                  </p>
+                )}
                 <DialogFooter>
-                  <Button type="submit" disabled={createClientForm.formState.isSubmitting}>
-                    {createClientForm.formState.isSubmitting ? 'Saving...' : 'Save Client'}
+                  <DialogClose asChild>
+                    <Button type="button" variant="secondary">
+                      Cancel
+                    </Button>
+                  </DialogClose>
+                  <Button
+                    type="submit"
+                    disabled={addClientForm.formState.isSubmitting}
+                  >
+                    {addClientForm.formState.isSubmitting
+                      ? 'Adding...'
+                      : 'Add Client'}
                   </Button>
                 </DialogFooter>
               </form>
@@ -280,63 +309,95 @@ export default function ClientsPage() {
           </DialogContent>
         </Dialog>
       </div>
-      <Card>
-        <CardHeader>
-          <CardTitle>Client Overview</CardTitle>
-          <CardDescription>A list of all your managed clients from the database.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
+
+      <div>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Client Name</TableHead>
+              <TableHead>Total Capital Deposited</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading ? (
               <TableRow>
-                <TableHead>Client Name</TableHead>
-                <TableHead className="text-right">Total Deposited</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableCell colSpan={3} className="text-center h-24">
+                  Loading clients...
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {profiles.map((profile) => (
-                <TableRow key={profile.id}>
+            ) : error ? (
+              <TableRow>
+                <TableCell
+                  colSpan={3}
+                  className="text-center h-24 text-destructive"
+                >
+                  {error}
+                </TableCell>
+              </TableRow>
+            ) : clients.length > 0 ? (
+              clients.map((client) => (
+                <TableRow key={client.id}>
+                  <TableCell className="font-medium">{client.name}</TableCell>
                   <TableCell>
-                    <div className="flex items-center gap-3">
-                      <Avatar>
-                        <AvatarFallback>{profile.name?.charAt(0).toUpperCase()}</AvatarFallback>
-                      </Avatar>
-                      <div className="font-medium">{profile.name}</div>
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right font-mono">
-                    ${profile.total_deposited_usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {new Intl.NumberFormat('en-US', {
+                      style: 'currency',
+                      currency: 'USD',
+                    }).format(client.total_deposited_usd)}
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button variant="outline" size="sm" onClick={() => handleDepositWithdrawClick(profile)}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleManageFundsClick(client)}
+                    >
                       Deposit / Withdraw
                     </Button>
                   </TableCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+              ))
+            ) : (
+              <TableRow>
+                <TableCell colSpan={3} className="text-center h-24">
+                  No clients found. Add one to get started.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
 
-      <Dialog open={isDepositWithdrawDialogOpen} onOpenChange={setDepositWithdrawDialogOpen}>
+      <Dialog
+        open={isManageFundsOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedClient(null);
+          }
+          setManageFundsOpen(open);
+        }}
+      >
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
-            <DialogTitle>Deposit / Withdraw for {selectedProfile?.name}</DialogTitle>
+            <DialogTitle>Manage Funds for {selectedClient?.name}</DialogTitle>
             <DialogDescription>
-              Select transaction type and enter the amount in USD.
+              Make a new deposit or withdraw capital.
             </DialogDescription>
           </DialogHeader>
-          <Form {...depositWithdrawForm}>
-            <form onSubmit={depositWithdrawForm.handleSubmit(onDepositWithdrawSubmit)} className="space-y-4 py-4">
+          <Form {...manageFundsForm}>
+            <form
+              onSubmit={manageFundsForm.handleSubmit(onManageFundsSubmit)}
+              className="space-y-4"
+            >
               <FormField
-                control={depositWithdrawForm.control}
-                name="transaction_type"
+                control={manageFundsForm.control}
+                name="type"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Transaction Type</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <Select
+                      onValueChange={field.onChange}
+                      defaultValue={field.value}
+                    >
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select a transaction type" />
@@ -352,21 +413,36 @@ export default function ClientsPage() {
                 )}
               />
               <FormField
-                control={depositWithdrawForm.control}
+                control={manageFundsForm.control}
                 name="amount"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Amount (USD)</FormLabel>
                     <FormControl>
-                      <Input type="number" placeholder="e.g. 1000" {...field} />
+                      <Input type="number" placeholder="10000" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
+              {manageFundsForm.formState.errors.root && (
+                <p className="text-sm font-medium text-destructive">
+                  {manageFundsForm.formState.errors.root.message}
+                </p>
+              )}
               <DialogFooter>
-                <Button type="submit" disabled={depositWithdrawForm.formState.isSubmitting}>
-                  {depositWithdrawForm.formState.isSubmitting ? 'Processing...' : 'Submit Transaction'}
+                <DialogClose asChild>
+                  <Button type="button" variant="secondary">
+                    Cancel
+                  </Button>
+                </DialogClose>
+                <Button
+                  type="submit"
+                  disabled={manageFundsForm.formState.isSubmitting}
+                >
+                  {manageFundsForm.formState.isSubmitting
+                    ? 'Processing...'
+                    : 'Submit Transaction'}
                 </Button>
               </DialogFooter>
             </form>
