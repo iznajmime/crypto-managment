@@ -89,7 +89,12 @@ export default function Trades() {
             A log of all buy and sell asset trades.
           </p>
         </div>
-        <Button onClick={() => setIsDialogOpen(true)}>Add New Trade</Button>
+        <Button
+          onClick={() => setIsDialogOpen(true)}
+          className="glass-button"
+        >
+          Add New Trade
+        </Button>
       </div>
 
       <NewTradeDialog

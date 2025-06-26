@@ -215,7 +215,7 @@ export default function Clients() {
         </div>
         <Dialog open={isAddClientOpen} onOpenChange={setAddClientOpen}>
           <DialogTrigger asChild>
-            <Button>
+            <Button className="glass-button">
               <PlusCircle className="mr-2 h-4 w-4" />
               Add New Client
             </Button>
@@ -347,9 +347,9 @@ export default function Clients() {
                   </TableCell>
                   <TableCell className="text-right">
                     <Button
-                      variant="outline"
                       size="sm"
                       onClick={() => handleManageFundsClick(client)}
+                      className="glass-button"
                     >
                       Deposit / Withdraw
                     </Button>

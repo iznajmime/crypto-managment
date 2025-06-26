@@ -109,11 +109,6 @@ export default function Dashboard() {
         if (!transactions) throw new Error("No transactions found.");
 
         // --- Aggregation for Calculations ---
-        const assetAggregates: Record<string, {
-          totalBuyQuantity: number;
-          totalSellQuantity: number;
-          totalBuyValue: number;
-        }> = {};
         const assetPortfolios: Record<string, { quantity: number; totalCost: number }> = {};
         let cashBalance = 0;
         const uniqueAssetIds = new Set<string>();
@@ -131,24 +126,18 @@ export default function Dashboard() {
           if (asset && asset_quantity && asset_quantity > 0) {
             uniqueAssetIds.add(asset);
             if (!assetPortfolios[asset]) assetPortfolios[asset] = { quantity: 0, totalCost: 0 };
+            
             if (transaction_type === "BUY") {
               assetPortfolios[asset].quantity += asset_quantity;
               assetPortfolios[asset].totalCost += transaction_value_usd;
             } else if (transaction_type === "SELL") {
               const portfolio = assetPortfolios[asset];
               if (portfolio && portfolio.quantity > 0) {
-                const avgCost = portfolio.totalCost / portfolio.quantity;
-                portfolio.totalCost -= asset_quantity * avgCost;
+                // Reduce cost basis proportionally to the quantity sold (weighted-average cost)
+                const costOfSoldAssets = (portfolio.totalCost / portfolio.quantity) * asset_quantity;
+                portfolio.totalCost -= costOfSoldAssets;
                 portfolio.quantity -= asset_quantity;
               }
-            }
-
-            if (!assetAggregates[asset]) assetAggregates[asset] = { totalBuyQuantity: 0, totalSellQuantity: 0, totalBuyValue: 0 };
-            if (transaction_type === "BUY") {
-              assetAggregates[asset].totalBuyQuantity += asset_quantity;
-              assetAggregates[asset].totalBuyValue += transaction_value_usd;
-            } else if (transaction_type === "SELL") {
-              assetAggregates[asset].totalSellQuantity += asset_quantity;
             }
           }
         }
@@ -156,26 +145,17 @@ export default function Dashboard() {
         const assetIdsToFetch = Array.from(uniqueAssetIds);
         const prices = await fetchCryptoPrices(assetIdsToFetch);
 
-        let currentMarketValue = 0;
-        for (const assetId of assetIdsToFetch) {
-          const quantity = assetPortfolios[assetId]?.quantity || 0;
-          const price = prices[assetId]?.usd || 0;
-          currentMarketValue += quantity * price;
-        }
-        const totalPortfolioValue = currentMarketValue + cashBalance;
-        const totalCostBasis = Object.values(assetPortfolios).reduce((acc, p) => acc + p.totalCost, 0);
-        const pnlUsd = currentMarketValue - totalCostBasis;
-        const pnlPercent = totalCostBasis > 0 ? (pnlUsd / totalCostBasis) * 100 : 0;
-        setMetrics({ totalValue: totalPortfolioValue, pnlUsd, pnlPercent });
+        // --- UNIFIED P&L CALCULATION ---
 
+        // 1. Calculate individual positions using the correct cost basis from assetPortfolios
         const positions: OpenPosition[] = [];
-        for (const asset in assetAggregates) {
-          const data = assetAggregates[asset];
-          const quantityHeld = data.totalBuyQuantity - data.totalSellQuantity;
+        for (const asset in assetPortfolios) {
+          const portfolio = assetPortfolios[asset];
+          const quantityHeld = portfolio.quantity;
 
+          // Only include positions with a meaningful quantity
           if (quantityHeld > 1e-9) {
-            const avgBuyPrice = data.totalBuyQuantity > 0 ? data.totalBuyValue / data.totalBuyQuantity : 0;
-            const costBasis = quantityHeld * avgBuyPrice;
+            const costBasis = portfolio.totalCost;
             const livePrice = prices[asset]?.usd || 0;
             const sevenDayChange = prices[asset]?.usd_7d_change || 0;
             const marketValue = quantityHeld * livePrice;
@@ -186,6 +166,20 @@ export default function Dashboard() {
           }
         }
         setOpenPositions(positions.sort((a, b) => b.marketValue - a.marketValue));
+
+        // 2. Derive overall metrics from the sum of individual positions to ensure consistency
+        const totalMarketValue = positions.reduce((acc, pos) => acc + pos.marketValue, 0);
+        const totalPnlUsd = positions.reduce((acc, pos) => acc + pos.pnl, 0);
+        const totalCostBasis = positions.reduce((acc, pos) => acc + (pos.marketValue - pos.pnl), 0);
+
+        const totalPortfolioValue = totalMarketValue + cashBalance;
+        const pnlPercent = totalCostBasis > 0 ? (totalPnlUsd / totalCostBasis) * 100 : 0;
+
+        setMetrics({
+          totalValue: totalPortfolioValue,
+          pnlUsd: totalPnlUsd,
+          pnlPercent: pnlPercent,
+        });
 
         // --- Client Ownership Calculation ---
         const { data: profiles, error: profilesError } = await supabase
